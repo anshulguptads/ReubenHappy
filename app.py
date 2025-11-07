@@ -1,5 +1,4 @@
-# Write a Streamlit app.py that fixes the OneHotEncoder error by using sparse_output when available,
-# and falling back to sparse=False for older scikit-learn versions.
+# Write a clean Streamlit app.py with no writes to /mnt/data during app runtime.
 app_py = r"""
 import streamlit as st
 import pandas as pd
@@ -7,7 +6,6 @@ import numpy as np
 import altair as alt
 import matplotlib.pyplot as plt
 
-from io import BytesIO
 from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
@@ -21,23 +19,25 @@ from sklearn.metrics import (
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 
+# ----------------------------
+# Page Config
+# ----------------------------
 st.set_page_config(page_title="HR Attrition Analytics & Prediction", layout="wide")
 
-# --- Helper to create OneHotEncoder that works across sklearn versions ---
+# ----------------------------
+# Utilities
+# ----------------------------
 def make_ohe():
-    \"\"\"Return an OneHotEncoder compatible with both new and old scikit-learn versions.\"\"\"
+    \"\"\"OneHotEncoder that works across sklearn versions.\"\"\"
     try:
-        # Newer sklearn (>=1.4) uses sparse_output
-        return OneHotEncoder(handle_unknown=\"ignore\", sparse_output=False)
+        return OneHotEncoder(handle_unknown=\"ignore\", sparse_output=False)  # new sklearn
     except TypeError:
-        # Older sklearn expects 'sparse'
-        return OneHotEncoder(handle_unknown=\"ignore\", sparse=False)
+        return OneHotEncoder(handle_unknown=\"ignore\", sparse=False)         # old sklearn
 
 @st.cache_data
 def load_data(default_path=\"EA.csv\"):
     try:
-        df = pd.read_csv(default_path)
-        return df
+        return pd.read_csv(default_path)
     except Exception:
         return None
 
@@ -53,13 +53,12 @@ def detect_columns(df):
     return cat_cols, num_cols, sat_cols
 
 def apply_filters(df, jobrole_selected, sat_col, sat_range):
+    if df is None or df.empty:
+        return df
     mask = pd.Series(True, index=df.index)
-    if jobrole_selected:
-        if \"JobRole\" in df.columns:
-            mask &= df[\"JobRole\"].isin(jobrole_selected)
-        else:
-            st.warning(\"JobRole column not found in dataset; JobRole filter ignored.\")
-    if sat_col is not None and sat_col in df.columns and sat_range is not None:
+    if jobrole_selected and \"JobRole\" in df.columns:
+        mask &= df[\"JobRole\"].isin(jobrole_selected)
+    if sat_col and sat_col in df.columns and sat_range:
         low, high = sat_range
         mask &= df[sat_col].between(low, high)
     return df[mask].copy()
@@ -175,7 +174,9 @@ def feature_importances(pipe):
         names.extend(part.tolist())
     return pd.DataFrame({\"feature\": names, \"importance\": clf.feature_importances_}).sort_values(\"importance\", ascending=False)
 
-# ---------------- UI ----------------
+# ----------------------------
+# App
+# ----------------------------
 st.title(\"HR Attrition Analytics & Prediction\")
 
 with st.expander(\"Data source\", expanded=True):
@@ -194,7 +195,6 @@ ensure_target(df)
 
 # Sidebar Filters
 cat_cols_all, num_cols_all, sat_cols_all = detect_columns(df)
-
 st.sidebar.header(\"Filters\")
 jobrole_options = sorted(df[\"JobRole\"].dropna().unique().tolist()) if \"JobRole\" in df.columns else []
 jobrole_selected = st.sidebar.multiselect(\"JobRole\", options=jobrole_options, default=jobrole_options[:3] if jobrole_options else [])
@@ -207,7 +207,6 @@ else:
     sat_range = None
     st.sidebar.info(\"No numeric *Satisfaction* columns detected.\")
 
-# Apply filters
 df_f = apply_filters(df, jobrole_selected, sat_col, sat_range)
 
 tabs = st.tabs([\"📊 Insights Dashboard\", \"🤖 Modeling (DT / RF / GBRT)\", \"📥 Upload & Predict\"])
